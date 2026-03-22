@@ -841,23 +841,29 @@ function animHover(){
 /* ════════════════════════════════
    SPARKLINE
 ════════════════════════════════ */
+const SPARK_CACHE={};
+
 function drawSparkline(can,chg,code){
   const sc=can.getContext("2d");
   const W=can.width,H=can.height;
   sc.clearRect(0,0,W,H);
-  // code가 있으면 시드 기반 고정 포인트, 없으면 랜덤
+
   let pts;
-  if(code&&SPARK_CACHE&&SPARK_CACHE[code]){
+  if(code){
+    if(!SPARK_CACHE[code]){
+      // 시드 기반 고정 난수로 포인트 생성
+      let s=code.split("").reduce((a,c)=>a+c.charCodeAt(0),0)*31+Math.round(chg*100);
+      const rand=()=>{s=(s*1664525+1013904223)&0xffffffff;return(s>>>0)/0xffffffff;};
+      const drift=chg/40*0.6;let v=0;pts=[];
+      for(let i=0;i<40;i++){v+=(rand()-.48+drift)*0.55;pts.push(v);}
+      SPARK_CACHE[code]=pts;
+    }
     pts=SPARK_CACHE[code];
   } else {
-    const N=40,drift=chg/40*0.8;let v=0;pts=[];
-    const rand=code?(()=>{
-      let s=code.split("").reduce((a,c)=>a+c.charCodeAt(0),0)*31+Math.round(chg*100);
-      return()=>{s=(s*1664525+1013904223)&0xffffffff;return(s>>>0)/0xffffffff;};
-    })():()=>Math.random();
-    for(let i=0;i<N;i++){v+=(rand()-.48+drift*.5)*.6;pts.push(v);}
-    if(code&&typeof SPARK_CACHE!=="undefined") SPARK_CACHE[code]=pts;
+    const drift=chg/40*0.8;let v=0;pts=[];
+    for(let i=0;i<40;i++){v+=(Math.random()-.48+drift*.5)*.6;pts.push(v);}
   }
+
   const mn=Math.min(...pts),mx=Math.max(...pts),range=mx-mn||1;
   const col=chg>=0?"#e22b2b":"#1763b2";
   sc.beginPath();
