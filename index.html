@@ -19,7 +19,40 @@
   --m:'Roboto Mono','Fira Code',monospace;
 }
 html,body{height:100%;overflow:hidden}
-body{font-family:var(--f);background:var(--bg);color:var(--bright);display:flex;flex-direction:column;height:100vh;height:100dvh;-webkit-font-smoothing:antialiased}
+body{font-family:var(--f);background:var(--bg);color:var(--bright);display:flex;flex-direction:column;height:100vh;height:100dvh;-webkit-font-smoothing:antialiased;-webkit-text-size-adjust:100%}
+
+/* 터치 스크롤 방지 */
+canvas{display:block;touch-action:none}
+
+/* ── 모바일 반응형 (600px 이하) ── */
+@media(max-width:600px){
+  .topbar{height:40px}
+  .t-brand{padding:0 10px;gap:7px}
+  .t-title{display:none}
+  .t-idx{padding:0 10px}
+  .t-val{font-size:11px}
+  .t-chg{font-size:9px;padding:1px 4px}
+  .t-status{padding:0 10px}
+  .stxt{display:none}
+  .fbar{height:30px;padding:0 8px}
+  .f-lbl{display:none}
+  .chip{padding:2px 7px;font-size:10px}
+  .lgbar{width:50px}
+  .btm{height:20px;padding:0 10px;font-size:8px}
+  /* 툴팁: 화면 하단 고정 */
+  .tt{
+    position:fixed!important;
+    left:8px!important;right:8px!important;
+    bottom:24px!important;top:auto!important;
+    max-width:none!important;min-width:0!important;
+    width:calc(100% - 16px);
+    border-radius:12px;
+  }
+}
+/* 아주 좁은 화면 (380px 이하): KOSDAQ 숨김 */
+@media(max-width:380px){
+  .t-indices .t-idx:last-child{display:none}
+}
 
 .topbar{display:flex;align-items:center;height:46px;background:var(--panel);border-bottom:1px solid var(--border);flex-shrink:0}
 .t-brand{display:flex;align-items:center;gap:10px;padding:0 20px;height:100%;border-right:1px solid var(--border);flex-shrink:0}
@@ -143,6 +176,27 @@ canvas{display:block}
 </footer>
 
 <script>
+/* ── 에러 방어막 ── */
+window.onerror=function(msg,_,line){
+  var l=document.getElementById("lov");if(l)l.style.display="flex";
+  var t=document.getElementById("ltxt");if(t)t.textContent="오류: "+msg+" (line "+line+")";
+  return false;
+};
+
+/* ── Canvas roundRect 폴리필 (iOS 15 이하 Safari) ── */
+if(!CanvasRenderingContext2D.prototype.roundRect){
+  CanvasRenderingContext2D.prototype.roundRect=function(x,y,w,h,r){
+    r=Math.min(r||0,w/2,h/2);
+    this.beginPath();
+    this.moveTo(x+r,y);
+    this.lineTo(x+w-r,y);this.arcTo(x+w,y,x+w,y+r,r);
+    this.lineTo(x+w,y+h-r);this.arcTo(x+w,y+h,x+w-r,y+h,r);
+    this.lineTo(x+r,y+h);this.arcTo(x,y+h,x,y+h-r,r);
+    this.lineTo(x,y+r);this.arcTo(x,y,x+r,y,r);
+    this.closePath();return this;
+  };
+}
+
 /* ════════════════════════════════
    STOCK DATA
 ════════════════════════════════ */
@@ -235,15 +289,6 @@ const chEl=document.getElementById("chips");
    2) allorigins.win
    3) 직접 호출 (운 좋으면 CORS 없이 통과)
 ════════════════════════════════ */
-
-// AbortSignal.timeout 폴리필 (구형 Android/iOS 브라우저 대응)
-if(!AbortSignal.timeout){
-  AbortSignal.timeout=function(ms){
-    const ctrl=new AbortController();
-    setTimeout(()=>ctrl.abort(),ms);
-    return ctrl.signal;
-  };
-}
 
 // ★ Cloudflare Worker URL 설정 (있으면 최우선 사용)
 // proxy-worker.js를 Cloudflare Workers에 배포한 후 아래에 입력:
@@ -380,7 +425,6 @@ async function loadAll(){
   const srcEl=document.getElementById("src");
   try{
     const {n,proxy}=await loadData();
-    clearSparkCache(); // 새 데이터로 스파크라인 재생성
     sdot.className="sdot live";
     updEl.textContent=new Date().toLocaleTimeString("ko-KR",{hour:"2-digit",minute:"2-digit",second:"2-digit"})+" 업데이트";
     srcEl.textContent=`Yahoo Finance (${proxy}) · ${n}개 · 클릭 시 네이버 금융`;
@@ -659,17 +703,7 @@ function drawTile(r, prog){
 
   ctx.fillStyle=bgColor;
   ctx.beginPath();
-  if(ctx.roundRect){
-    ctx.roundRect(tx,ty,tw,th,2);
-  } else {
-    const r2=2;
-    ctx.moveTo(tx+r2,ty);
-    ctx.lineTo(tx+tw-r2,ty); ctx.arcTo(tx+tw,ty,tx+tw,ty+r2,r2);
-    ctx.lineTo(tx+tw,ty+th-r2); ctx.arcTo(tx+tw,ty+th,tx+tw-r2,ty+th,r2);
-    ctx.lineTo(tx+r2,ty+th); ctx.arcTo(tx,ty+th,tx,ty+th-r2,r2);
-    ctx.lineTo(tx,ty+r2); ctx.arcTo(tx,ty,tx+r2,ty,r2);
-    ctx.closePath();
-  }
+  ctx.roundRect(tx,ty,tw,th,2);
   ctx.fill();
 
   ctx.strokeStyle=bdColor;
@@ -807,60 +841,35 @@ function animHover(){
 /* ════════════════════════════════
    SPARKLINE
 ════════════════════════════════ */
-/* 종목 코드를 시드로 하는 고정 난수 — 같은 종목은 항상 같은 모양 */
-function seededRand(seed){
-  let s=seed;
-  return function(){
-    s=(s*1664525+1013904223)&0xffffffff;
-    return(s>>>0)/0xffffffff;
-  };
-}
-
-/* 스파크라인 포인트 캐시: 종목코드 → pts 배열 */
-const SPARK_CACHE={};
-
-function getSparkPts(code, chg){
-  if(SPARK_CACHE[code]) return SPARK_CACHE[code];
-  // 종목 코드를 숫자 시드로 변환
-  const seed=code.split("").reduce((a,c)=>a+c.charCodeAt(0),0)*31+Math.round(chg*100);
-  const rand=seededRand(seed);
-  const N=40, pts=[];
-  const drift=chg/N*0.6;
-  let v=0;
-  for(let i=0;i<N;i++){
-    v+=(rand()-0.48+drift)*0.55;
-    pts.push(v);
-  }
-  SPARK_CACHE[code]=pts;
-  return pts;
-}
-
-function drawSparkline(can, chg, code){
+function drawSparkline(can,chg,code){
   const sc=can.getContext("2d");
-  const W=can.width, H=can.height;
+  const W=can.width,H=can.height;
   sc.clearRect(0,0,W,H);
-
-  const pts=getSparkPts(code, chg);
-  const mn=Math.min(...pts), mx=Math.max(...pts), range=mx-mn||1;
+  // code가 있으면 시드 기반 고정 포인트, 없으면 랜덤
+  let pts;
+  if(code&&SPARK_CACHE&&SPARK_CACHE[code]){
+    pts=SPARK_CACHE[code];
+  } else {
+    const N=40,drift=chg/40*0.8;let v=0;pts=[];
+    const rand=code?(()=>{
+      let s=code.split("").reduce((a,c)=>a+c.charCodeAt(0),0)*31+Math.round(chg*100);
+      return()=>{s=(s*1664525+1013904223)&0xffffffff;return(s>>>0)/0xffffffff;};
+    })():()=>Math.random();
+    for(let i=0;i<N;i++){v+=(rand()-.48+drift*.5)*.6;pts.push(v);}
+    if(code&&typeof SPARK_CACHE!=="undefined") SPARK_CACHE[code]=pts;
+  }
+  const mn=Math.min(...pts),mx=Math.max(...pts),range=mx-mn||1;
   const col=chg>=0?"#e22b2b":"#1763b2";
-
   sc.beginPath();
   pts.forEach((p,i)=>{
-    const px=i/(pts.length-1)*W;
-    const py=H-4-((p-mn)/range)*(H-8);
+    const px=i/(pts.length-1)*W,py=H-4-((p-mn)/range)*(H-8);
     i===0?sc.moveTo(px,py):sc.lineTo(px,py);
   });
-  sc.strokeStyle=col; sc.lineWidth=1.5; sc.stroke();
-
-  const ly=H-4-((pts[pts.length-1]-mn)/range)*(H-8);
-  sc.lineTo(W,ly); sc.lineTo(W,H); sc.lineTo(0,H);
-  sc.closePath();
-  sc.fillStyle=chg>=0?"rgba(226,43,43,.15)":"rgba(23,99,178,.18)";
-  sc.fill();
+  sc.strokeStyle=col;sc.lineWidth=1.5;sc.stroke();
+  sc.lineTo(W,H-4-((pts[pts.length-1]-mn)/range)*(H-8));
+  sc.lineTo(W,H);sc.lineTo(0,H);sc.closePath();
+  sc.fillStyle=chg>=0?"rgba(226,43,43,.15)":"rgba(23,99,178,.18)";sc.fill();
 }
-
-/* 데이터 갱신 시 스파크라인 캐시 초기화 */
-function clearSparkCache(){ Object.keys(SPARK_CACHE).forEach(k=>delete SPARK_CACHE[k]); }
 
 /* ════════════════════════════════
    INTERACTION
@@ -886,7 +895,7 @@ cv.addEventListener("mousemove",e=>{
     const ch=document.getElementById("tt-ch");ch.textContent=sign+r.chg.toFixed(2)+"%";ch.className="tt-rv "+cls;
     const bd=document.getElementById("tt-bd");bd.textContent=sign+r.chg.toFixed(2)+"%";bd.className="tt-badge "+cls;
     document.getElementById("tt-sc").textContent=r.sector;
-    drawSparkline(document.getElementById("tt-sp"), r.chg, r.c);
+    drawSparkline(document.getElementById("tt-sp"),r.chg,r.c);
     tt.style.display="block";
     let lx=e.clientX+16,ly=e.clientY-14;
     if(lx+240>innerWidth)lx=e.clientX-248;
@@ -900,53 +909,38 @@ cv.addEventListener("click",e=>{
   if(idx>=0)window.open(`https://finance.naver.com/item/main.naver?code=${tiles[idx].c}`,"_blank");
 });
 
-/* ── 모바일 터치 이벤트 ── */
-let lastTouchIdx=-1;
+/* ── 터치 이벤트 (모바일) ── */
+function showTip(r){
+  const full=SECTORS.flatMap(s=>s.stocks).find(st=>st.c===r.c)?.full??r.n;
+  const sign=r.chg>=0?"+":"",cls=r.chg>0.05?"u":r.chg<-0.05?"d":"";
+  document.getElementById("tt-tk").textContent=r.n;
+  document.getElementById("tt-nm").textContent=full;
+  document.getElementById("tt-pr").textContent=r.price?r.price.toLocaleString("ko-KR")+"원":"—";
+  const ch=document.getElementById("tt-ch");ch.textContent=sign+r.chg.toFixed(2)+"%";ch.className="tt-rv "+cls;
+  const bd=document.getElementById("tt-bd");bd.textContent=sign+r.chg.toFixed(2)+"%";bd.className="tt-badge "+cls;
+  document.getElementById("tt-sc").textContent=r.sector;
+  drawSparkline(document.getElementById("tt-sp"),r.chg,r.c);
+  tt.style.display="block";
+}
+let _touchTimer=null,_lastIdx=-1;
 cv.addEventListener("touchstart",e=>{
   e.preventDefault();
-  const t=e.touches[0];
-  const rc=cv.getBoundingClientRect();
-  const mx=t.clientX-rc.left, my=t.clientY-rc.top;
-  const idx=hit(mx,my);
-  if(idx>=0){
-    lastTouchIdx=idx;
-    hovIdx=idx; hovProgress=1; draw();
-    const r=tiles[idx];
-    const full=SECTORS.flatMap(s=>s.stocks).find(st=>st.c===r.c)?.full??r.n;
-    const sign=r.chg>=0?"+":"",cls=r.chg>0.05?"u":r.chg<-0.05?"d":"";
-    document.getElementById("tt-tk").textContent=r.n;
-    document.getElementById("tt-nm").textContent=full;
-    document.getElementById("tt-pr").textContent=r.price?r.price.toLocaleString("ko-KR")+"원":"—";
-    const ch=document.getElementById("tt-ch");ch.textContent=sign+r.chg.toFixed(2)+"%";ch.className="tt-rv "+cls;
-    const bd=document.getElementById("tt-bd");bd.textContent=sign+r.chg.toFixed(2)+"%";bd.className="tt-badge "+cls;
-    document.getElementById("tt-sc").textContent=r.sector;
-    drawSparkline(document.getElementById("tt-sp"),r.chg,r.c);
-    tt.style.display="block";
-    // 툴팁 위치: 터치 위쪽에 표시
-    let lx=t.clientX-85, ly=t.clientY-230;
-    if(lx<4) lx=4;
-    if(lx+220>innerWidth) lx=innerWidth-224;
-    if(ly<4) ly=t.clientY+20;
-    tt.style.left=lx+"px"; tt.style.top=ly+"px";
-  }
+  const t=e.touches[0],rc=cv.getBoundingClientRect();
+  const idx=hit(t.clientX-rc.left,t.clientY-rc.top);
+  _lastIdx=idx;
+  if(idx>=0){hovIdx=idx;hovProgress=1;draw();showTip(tiles[idx]);}
+  if(_touchTimer)clearTimeout(_touchTimer);
+  _touchTimer=setTimeout(()=>{
+    tt.style.display="none";hovIdx=-1;hovProgress=0;draw();
+    if(_lastIdx>=0){window.open(`https://finance.naver.com/item/main.naver?code=${tiles[_lastIdx].c}`,"_blank");_lastIdx=-1;}
+  },700);
 },{passive:false});
-
-cv.addEventListener("touchend",e=>{
-  e.preventDefault();
-  // 짧은 탭이면 네이버 금융으로 이동
-  setTimeout(()=>{
-    tt.style.display="none";
-    hovIdx=-1; hovProgress=0; draw();
-    if(lastTouchIdx>=0){
-      window.open(`https://finance.naver.com/item/main.naver?code=${tiles[lastTouchIdx].c}`,"_blank");
-      lastTouchIdx=-1;
-    }
-  },600);
-},{passive:false});
-
+cv.addEventListener("touchend",e=>{e.preventDefault();},{passive:false});
 cv.addEventListener("touchmove",e=>{
   e.preventDefault();
-  tt.style.display="none"; hovIdx=-1; hovProgress=0; lastTouchIdx=-1; draw();
+  tt.style.display="none";hovIdx=-1;hovProgress=0;_lastIdx=-1;
+  if(_touchTimer){clearTimeout(_touchTimer);_touchTimer=null;}
+  draw();
 },{passive:false});
 
 /* ════════════════════════════════
