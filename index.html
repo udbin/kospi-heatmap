@@ -195,6 +195,21 @@ window.addEventListener("unhandledrejection",function(e){
   if(lsub) lsub.textContent=String(e.reason).slice(0,80);
 });
 
+/* ── Promise.any 폴리필 ── */
+if(!Promise.any){
+  Promise.any=function(ps){
+    return new Promise(function(resolve,reject){
+      var errs=[],done=0;
+      ps.forEach(function(p,i){
+        Promise.resolve(p).then(resolve,function(e){
+          errs[i]=e;
+          if(++done===ps.length) reject(new Error("All failed"));
+        });
+      });
+    });
+  };
+}
+
 /* ── AbortSignal.timeout 폴리필 ── */
 if(!AbortSignal.timeout){
   AbortSignal.timeout=function(ms){
@@ -384,65 +399,55 @@ async function tryDirect(tickers){
   return rows;
 }
 
-/* 메인 데이터 로드: 3개 프록시 순차 시도 */
+/* 메인 데이터 로드: 모든 프록시 동시 시도 → 가장 먼저 성공한 것 사용 */
 async function loadData(){
-  const proxies=[
-    {name:"Cloudflare Worker", fn:tryWorker},
-    {name:"corsproxy.io", fn:tryCorsproxy},
-    {name:"allorigins",   fn:tryAllorigins},
-    {name:"직접 호출",    fn:tryDirect},
+  // 각 프록시를 Promise로 변환 — 실패 시 reject
+  function makeAttempt(name, fn){
+    return fn(TICKERS).then(rows=>{
+      if(!rows||!rows.length) throw new Error("empty");
+      return {rows, name};
+    });
+  }
+
+  const attempts=[
+    makeAttempt("Worker",     tryWorker),
+    makeAttempt("allorigins", tryAllorigins),
   ];
 
-  let rows=null, usedProxy="";
-  for(const p of proxies){
-    try{
-      rows=await p.fn(TICKERS);
-      usedProxy=p.name;
-      break;
-    }catch(e){
-      console.warn(`[${p.name}] 실패:`,e.message);
-    }
-  }
-  if(!rows) throw new Error("모든 프록시 실패");
+  // Promise.any: 가장 먼저 성공한 결과 반환
+  // 모두 실패하면 AggregateError throw
+  const {rows, name} = await Promise.any(attempts);
 
   let loaded=0;
   rows.forEach(q=>{
     const c=q.symbol.replace(".KS","");
     const chg=q.regularMarketChangePercent??0;
     const price=q.regularMarketPrice??0;
-    if(price>0){
-      PD[c]={chg:+chg.toFixed(2), price};
-      loaded++;
-    }
+    if(price>0){ PD[c]={chg:+chg.toFixed(2),price}; loaded++; }
   });
 
-  return {n:loaded, proxy:usedProxy};
+  return {n:loaded, proxy:name};
 }
 
 /* 지수 로드 */
-async function loadIdx(sym,vId,bId,fv,fc){
+async function loadIdx(sym,vId,bId){
   const target=`https://query1.finance.yahoo.com/v8/finance/chart/${sym}?interval=1d&range=1d`;
-  const urls=[];
-  if(CF_WORKER) urls.push(`${CF_WORKER}/chart?symbol=${sym}`);
-  urls.push(
-    `https://corsproxy.io/?url=${encodeURIComponent(target)}`,
-    `https://api.allorigins.win/get?url=${encodeURIComponent(target)}`,
-  );
-  for(const url of urls){
-    try{
-      const r=await fetchT(url,{},6000);
-      if(!r.ok) continue;
-      const body=await r.json();
-      const parsed = body.contents ? JSON.parse(body.contents) : body;
-      const m=parsed?.chart?.result?.[0]?.meta;
-      if(m && m.regularMarketPrice){
-        const chg=((m.regularMarketPrice-m.chartPreviousClose)/m.chartPreviousClose)*100;
-        setIdx(vId,bId,m.regularMarketPrice,chg);
-        return;
-      }
-    }catch(e){}
-  }
-  if(fv) setIdx(vId,bId,fv,fc);
+  const attempts=[
+    fetchT(`${CF_WORKER}/chart?symbol=${sym}`,{},6000)
+      .then(r=>r.ok?r.json():Promise.reject()),
+    fetchT(`https://api.allorigins.win/get?url=${encodeURIComponent(target)}`,{},8000)
+      .then(r=>r.ok?r.json():Promise.reject())
+      .then(b=>JSON.parse(b.contents)),
+  ];
+  try{
+    const body=await Promise.any(attempts);
+    const parsed=body.chart?body:body;
+    const m=parsed?.chart?.result?.[0]?.meta;
+    if(m?.regularMarketPrice){
+      const chg=((m.regularMarketPrice-m.chartPreviousClose)/m.chartPreviousClose)*100;
+      setIdx(vId,bId,m.regularMarketPrice,chg);
+    }
+  }catch(e){}
 }
 
 async function loadAll(){
@@ -468,8 +473,8 @@ async function loadAll(){
   const idxTimeout=new Promise(r=>setTimeout(r,10000));
   await Promise.race([
     Promise.allSettled([
-      loadIdx("%5EKS11","kv","kb",0,0),
-      loadIdx("%5EKQ11","qv","qb",0,0),
+      loadIdx("%5EKS11","kv","kb"),
+      loadIdx("%5EKQ11","qv","qb"),
     ]),
     idxTimeout,
   ]);
