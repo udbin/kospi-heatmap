@@ -22,7 +22,7 @@ html,body{height:100%;overflow:hidden}
 body{font-family:var(--f);background:var(--bg);color:var(--bright);display:flex;flex-direction:column;height:100vh;height:100dvh;-webkit-font-smoothing:antialiased;-webkit-text-size-adjust:100%}
 
 /* 터치 스크롤 방지 */
-canvas{display:block;touch-action:pan-y pan-x}
+canvas{display:block;touch-action:manipulation}
 
 /* ── 모바일 반응형 (600px 이하) ── */
 @media(max-width:600px){
@@ -877,6 +877,7 @@ function animHover(){
    SPARKLINE
 ════════════════════════════════ */
 const SPARK_CACHE={};
+function clearSparkCache(){Object.keys(SPARK_CACHE).forEach(k=>delete SPARK_CACHE[k]);}
 
 function drawSparkline(can,chg,code){
   const sc=can.getContext("2d");
@@ -978,7 +979,7 @@ cv.addEventListener("touchstart",e=>{
     hovIdx=idx;hovProgress=1;draw();
     showTip(tiles[idx]);
   }
-},{passive:true}); // passive:true → 스크롤 허용
+},{passive:false});
 
 cv.addEventListener("touchmove",e=>{
   const t=e.touches[0];
@@ -986,22 +987,17 @@ cv.addEventListener("touchmove",e=>{
   const dy=Math.abs(t.clientY-_touchStartY);
   if(dx>8||dy>8){
     _moved=true;
-    // 스크롤 중이면 툴팁 숨김
     tt.style.display="none";
     hovIdx=-1;hovProgress=0;
     draw();
   }
-},{passive:true}); // passive:true → 스크롤 허용
+},{passive:true});
 
 cv.addEventListener("touchend",e=>{
-  // 터치 이벤트 핸들러 안에서 직접 window.open → 팝업 차단 우회
-  if(!_moved && _touchIdx>=0){
+  if(!_moved&&_touchIdx>=0){
     const code=tiles[_touchIdx]?.c;
-    if(code){
-      window.open("https://finance.naver.com/item/main.naver?code="+code,"_blank");
-    }
+    if(code) window.open("https://finance.naver.com/item/main.naver?code="+code,"_blank");
   }
-  // 툴팁 잠시 후 닫기
   setTimeout(()=>{
     tt.style.display="none";
     hovIdx=-1;hovProgress=0;
@@ -1026,9 +1022,18 @@ async function loop(){
   document.getElementById("lov").style.display="flex";
   document.getElementById("ltxt").textContent="데이터 불러오는 중...";
   document.getElementById("lsub").textContent="Yahoo Finance 연결 시도 중";
-  await loadAll();
-  document.getElementById("lov").style.display="none";
-  draw();
+  try{
+    await loadAll();
+  }catch(e){
+    console.error("loop error:",e);
+    // 실패해도 데모 데이터로 채움
+    SECTORS.flatMap(s=>s.stocks).forEach(st=>{
+      if(!PD[st.c]) PD[st.c]={chg:+(Math.random()*6-3).toFixed(2),price:0};
+    });
+  }finally{
+    document.getElementById("lov").style.display="none";
+    draw();
+  }
   nextAt=Date.now()+REFRESH;
   loopTimer=setTimeout(loop,REFRESH);
 }
