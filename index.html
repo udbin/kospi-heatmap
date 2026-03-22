@@ -236,7 +236,7 @@ const chEl=document.getElementById("chips");
 // ★ Cloudflare Worker URL 설정 (있으면 최우선 사용)
 // proxy-worker.js를 Cloudflare Workers에 배포한 후 아래에 입력:
 // 예: const CF_WORKER = "https://kospi-proxy.유저명.workers.dev";
-const CF_WORKER = ""; // ← 여기에 워커 URL 입력
+const CF_WORKER = "https://wispy-wood-3ca4.okpika2006.workers.dev";
 
 let PD={},nextAt=0,REFRESH=3*60*1000; // 3분마다 갱신
 const TICKERS=SECTORS.flatMap(s=>s.stocks.map(st=>st.c+".KS"));
