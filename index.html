@@ -157,7 +157,7 @@ canvas{display:block;touch-action:manipulation}
 </div>
 
 <footer class="btm">
-  <span id="src">Yahoo Finance · 15분 지연 · 클릭 시 네이버 금융</span>
+  <span id="src">KIS Open API · 실시간 · 클릭 시 네이버 금융</span>
   <span id="nxt"></span>
 </footer>
 
@@ -287,69 +287,41 @@ if(!CanvasRenderingContext2D.prototype.roundRect){
   };
 }
 
-// ★ Cloudflare Worker URL
+// ★ Cloudflare Worker URL (KIS API 프록시)
 const CF_WORKER="https://wispy-wood-3ca4.okpika2006.workers.dev";
 
-let PD={},nextAt=0,REFRESH=3*60*1000; // 3분마다 갱신
-const TICKERS=SECTORS.flatMap(s=>s.stocks.map(st=>st.c+".KS"));
+let PD={},nextAt=0,REFRESH=60*1000; // 1분마다 갱신 (KIS 실시간에 가까운 데이터)
+const TICKERS=SECTORS.flatMap(s=>s.stocks.map(st=>st.c));
 
 function setIdx(vId,bId,val,chg){
-  document.getElementById(vId).textContent=val.toLocaleString("ko-KR");
+  document.getElementById(vId).textContent=val.toLocaleString("ko-KR",{maximumFractionDigits:2});
   const el=document.getElementById(bId);
   el.textContent=(chg>=0?"+":"")+chg.toFixed(2)+"%";
   el.className="t-chg "+(chg>=0?"u":"d");
 }
 
-/* Yahoo Finance URL (한 번에 전체 종목) */
-function yahooUrl(tickers){
-  return `https://query2.finance.yahoo.com/v7/finance/quote?symbols=${tickers.join(",")}&fields=regularMarketChangePercent,regularMarketPrice,regularMarketPreviousClose&formatted=false&lang=ko-KR`;
-}
-
-/* 메인 데이터 로드: Worker + allorigins 병렬 시도 → 먼저 성공한 것 사용 */
+/* KIS 종목 시세 로드 */
 async function loadData(){
   const sym=TICKERS.join(",");
-  const w=fetch(`${CF_WORKER}/quote?symbols=${sym}`,{signal:AbortSignal.timeout(10000)})
-    .then(r=>{if(!r.ok)throw new Error(r.status);return r.json();})
-    .then(j=>{
-      const rows=j?.quoteResponse?.result??[];
-      if(!rows.length)throw new Error("empty");
-      return{rows,name:"Worker"};
-    });
-  const ao=fetch(`https://api.allorigins.win/get?url=${encodeURIComponent(yahooUrl(TICKERS))}`,{signal:AbortSignal.timeout(12000)})
-    .then(r=>{if(!r.ok)throw new Error(r.status);return r.json();})
-    .then(b=>{
-      const rows=JSON.parse(b.contents)?.quoteResponse?.result??[];
-      if(!rows.length)throw new Error("empty");
-      return{rows,name:"allorigins"};
-    });
-  const{rows,name}=await Promise.any([w,ao]);
+  const res=await fetch(`${CF_WORKER}/quote?symbols=${sym}`,{signal:AbortSignal.timeout(15000)});
+  if(!res.ok) throw new Error("quote "+res.status);
+  const j=await res.json();
+  if(!j.quotes?.length) throw new Error("empty");
   let loaded=0;
-  rows.forEach(q=>{
-    const c=q.symbol.replace(".KS","");
-    if(q.regularMarketPrice){
-      PD[c]={chg:+(q.regularMarketChangePercent??0).toFixed(2),price:q.regularMarketPrice};
-      loaded++;
-    }
+  j.quotes.forEach(q=>{
+    PD[q.symbol]={chg:q.chgPct, price:q.price};
+    loaded++;
   });
-  return{n:loaded,proxy:name};
+  return {n:loaded, proxy:"KIS"};
 }
 
-/* 지수 로드: Worker + allorigins 병렬 */
-async function loadIdx(sym,vId,bId){
-  const target=`https://query1.finance.yahoo.com/v8/finance/chart/${sym}?interval=1d&range=1d`;
-  const parse=body=>{
-    const d=body.contents?JSON.parse(body.contents):body;
-    const m=d?.chart?.result?.[0]?.meta;
-    if(!m?.regularMarketPrice)throw new Error("no data");
-    return m;
-  };
-  try{
-    const m=await Promise.any([
-      fetch(`${CF_WORKER}/chart?symbol=${sym}`,{signal:AbortSignal.timeout(8000)}).then(r=>r.ok?r.json():Promise.reject()).then(parse),
-      fetch(`https://api.allorigins.win/get?url=${encodeURIComponent(target)}`,{signal:AbortSignal.timeout(10000)}).then(r=>r.ok?r.json():Promise.reject()).then(parse),
-    ]);
-    setIdx(vId,bId,m.regularMarketPrice,((m.regularMarketPrice-m.chartPreviousClose)/m.chartPreviousClose)*100);
-  }catch(e){}
+/* KIS 지수 로드 */
+async function loadIdx(){
+  const res=await fetch(`${CF_WORKER}/index`,{signal:AbortSignal.timeout(10000)});
+  if(!res.ok) throw new Error("index "+res.status);
+  const j=await res.json();
+  if(j.kospi)  setIdx("kv","kb",j.kospi.price, j.kospi.chgPct);
+  if(j.kosdaq) setIdx("qv","qb",j.kosdaq.price,j.kosdaq.chgPct);
 }
 
 async function loadAll(){
@@ -358,11 +330,10 @@ async function loadAll(){
   const srcEl=document.getElementById("src");
   try{
     const{n,proxy}=await loadData();
-    // 스파크라인 캐시 초기화
     Object.keys(SPARK_CACHE).forEach(k=>delete SPARK_CACHE[k]);
     sdot.className="sdot live";
     updEl.textContent=new Date().toLocaleTimeString("ko-KR",{hour:"2-digit",minute:"2-digit",second:"2-digit"})+" 업데이트";
-    srcEl.textContent=`Yahoo Finance (${proxy}) · ${n}개 · 클릭 시 네이버 금융`;
+    srcEl.textContent=`KIS Open API (실시간) · ${n}개 · 클릭 시 네이버 금융`;
   }catch(e){
     SECTORS.flatMap(s=>s.stocks).forEach(st=>{
       if(!PD[st.c])PD[st.c]={chg:+(Math.random()*10-5).toFixed(2),price:0};
@@ -373,7 +344,7 @@ async function loadAll(){
   }
   // 지수 로드 — 최대 10초
   await Promise.race([
-    Promise.allSettled([loadIdx("%5EKS11","kv","kb"),loadIdx("%5EKQ11","qv","qb")]),
+    loadIdx().catch(()=>{}),
     new Promise(r=>setTimeout(r,10000)),
   ]);
 }
