@@ -2,7 +2,10 @@
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>KOSPI Heatmap</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Roboto+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
@@ -16,7 +19,7 @@
   --m:'Roboto Mono','Fira Code',monospace;
 }
 html,body{height:100%;overflow:hidden}
-body{font-family:var(--f);background:var(--bg);color:var(--bright);display:flex;flex-direction:column;height:100dvh;-webkit-font-smoothing:antialiased}
+body{font-family:var(--f);background:var(--bg);color:var(--bright);display:flex;flex-direction:column;height:100vh;height:100dvh;-webkit-font-smoothing:antialiased}
 
 .topbar{display:flex;align-items:center;height:46px;background:var(--panel);border-bottom:1px solid var(--border);flex-shrink:0}
 .t-brand{display:flex;align-items:center;gap:10px;padding:0 20px;height:100%;border-right:1px solid var(--border);flex-shrink:0}
@@ -232,6 +235,15 @@ const chEl=document.getElementById("chips");
    2) allorigins.win
    3) 직접 호출 (운 좋으면 CORS 없이 통과)
 ════════════════════════════════ */
+
+// AbortSignal.timeout 폴리필 (구형 Android/iOS 브라우저 대응)
+if(!AbortSignal.timeout){
+  AbortSignal.timeout=function(ms){
+    const ctrl=new AbortController();
+    setTimeout(()=>ctrl.abort(),ms);
+    return ctrl.signal;
+  };
+}
 
 // ★ Cloudflare Worker URL 설정 (있으면 최우선 사용)
 // proxy-worker.js를 Cloudflare Workers에 배포한 후 아래에 입력:
@@ -647,7 +659,17 @@ function drawTile(r, prog){
 
   ctx.fillStyle=bgColor;
   ctx.beginPath();
-  ctx.roundRect(tx,ty,tw,th,2);
+  if(ctx.roundRect){
+    ctx.roundRect(tx,ty,tw,th,2);
+  } else {
+    const r2=2;
+    ctx.moveTo(tx+r2,ty);
+    ctx.lineTo(tx+tw-r2,ty); ctx.arcTo(tx+tw,ty,tx+tw,ty+r2,r2);
+    ctx.lineTo(tx+tw,ty+th-r2); ctx.arcTo(tx+tw,ty+th,tx+tw-r2,ty+th,r2);
+    ctx.lineTo(tx+r2,ty+th); ctx.arcTo(tx,ty+th,tx,ty+th-r2,r2);
+    ctx.lineTo(tx,ty+r2); ctx.arcTo(tx,ty,tx+r2,ty,r2);
+    ctx.closePath();
+  }
   ctx.fill();
 
   ctx.strokeStyle=bdColor;
@@ -877,6 +899,55 @@ cv.addEventListener("click",e=>{
   const rc=cv.getBoundingClientRect(),idx=hit(e.clientX-rc.left,e.clientY-rc.top);
   if(idx>=0)window.open(`https://finance.naver.com/item/main.naver?code=${tiles[idx].c}`,"_blank");
 });
+
+/* ── 모바일 터치 이벤트 ── */
+let lastTouchIdx=-1;
+cv.addEventListener("touchstart",e=>{
+  e.preventDefault();
+  const t=e.touches[0];
+  const rc=cv.getBoundingClientRect();
+  const mx=t.clientX-rc.left, my=t.clientY-rc.top;
+  const idx=hit(mx,my);
+  if(idx>=0){
+    lastTouchIdx=idx;
+    hovIdx=idx; hovProgress=1; draw();
+    const r=tiles[idx];
+    const full=SECTORS.flatMap(s=>s.stocks).find(st=>st.c===r.c)?.full??r.n;
+    const sign=r.chg>=0?"+":"",cls=r.chg>0.05?"u":r.chg<-0.05?"d":"";
+    document.getElementById("tt-tk").textContent=r.n;
+    document.getElementById("tt-nm").textContent=full;
+    document.getElementById("tt-pr").textContent=r.price?r.price.toLocaleString("ko-KR")+"원":"—";
+    const ch=document.getElementById("tt-ch");ch.textContent=sign+r.chg.toFixed(2)+"%";ch.className="tt-rv "+cls;
+    const bd=document.getElementById("tt-bd");bd.textContent=sign+r.chg.toFixed(2)+"%";bd.className="tt-badge "+cls;
+    document.getElementById("tt-sc").textContent=r.sector;
+    drawSparkline(document.getElementById("tt-sp"),r.chg,r.c);
+    tt.style.display="block";
+    // 툴팁 위치: 터치 위쪽에 표시
+    let lx=t.clientX-85, ly=t.clientY-230;
+    if(lx<4) lx=4;
+    if(lx+220>innerWidth) lx=innerWidth-224;
+    if(ly<4) ly=t.clientY+20;
+    tt.style.left=lx+"px"; tt.style.top=ly+"px";
+  }
+},{passive:false});
+
+cv.addEventListener("touchend",e=>{
+  e.preventDefault();
+  // 짧은 탭이면 네이버 금융으로 이동
+  setTimeout(()=>{
+    tt.style.display="none";
+    hovIdx=-1; hovProgress=0; draw();
+    if(lastTouchIdx>=0){
+      window.open(`https://finance.naver.com/item/main.naver?code=${tiles[lastTouchIdx].c}`,"_blank");
+      lastTouchIdx=-1;
+    }
+  },600);
+},{passive:false});
+
+cv.addEventListener("touchmove",e=>{
+  e.preventDefault();
+  tt.style.display="none"; hovIdx=-1; hovProgress=0; lastTouchIdx=-1; draw();
+},{passive:false});
 
 /* ════════════════════════════════
    REFRESH LOOP
