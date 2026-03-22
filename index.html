@@ -7,7 +7,6 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>KOSPI Heatmap</title>
-<!-- Google Fonts는 모바일에서 로딩 블로킹 유발 가능 → 시스템 폰트 사용 -->
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
@@ -19,40 +18,7 @@
   --m:'SF Mono','Fira Code','Consolas','Courier New',monospace;
 }
 html,body{height:100%;overflow:hidden}
-body{font-family:var(--f);background:var(--bg);color:var(--bright);display:flex;flex-direction:column;height:100vh;height:100dvh;-webkit-font-smoothing:antialiased;-webkit-text-size-adjust:100%}
-
-/* 터치 스크롤 방지 */
-canvas{display:block;touch-action:manipulation}
-
-/* ── 모바일 반응형 (600px 이하) ── */
-@media(max-width:600px){
-  .topbar{height:40px}
-  .t-brand{padding:0 10px;gap:7px}
-  .t-title{display:none}
-  .t-idx{padding:0 10px}
-  .t-val{font-size:11px}
-  .t-chg{font-size:9px;padding:1px 4px}
-  .t-status{padding:0 10px}
-  .stxt{display:none}
-  .fbar{height:30px;padding:0 8px}
-  .f-lbl{display:none}
-  .chip{padding:2px 7px;font-size:10px}
-  .lgbar{width:50px}
-  .btm{height:20px;padding:0 10px;font-size:8px}
-  /* 툴팁: 화면 하단 고정 */
-  .tt{
-    position:fixed!important;
-    left:8px!important;right:8px!important;
-    bottom:24px!important;top:auto!important;
-    max-width:none!important;min-width:0!important;
-    width:calc(100% - 16px);
-    border-radius:12px;
-  }
-}
-/* 아주 좁은 화면 (380px 이하): KOSDAQ 숨김 */
-@media(max-width:380px){
-  .t-indices .t-idx:last-child{display:none}
-}
+body{font-family:var(--f);background:var(--bg);color:var(--bright);display:flex;flex-direction:column;height:100vh;height:100dvh;-webkit-font-smoothing:antialiased}
 
 .topbar{display:flex;align-items:center;height:46px;background:var(--panel);border-bottom:1px solid var(--border);flex-shrink:0}
 .t-brand{display:flex;align-items:center;gap:10px;padding:0 20px;height:100%;border-right:1px solid var(--border);flex-shrink:0}
@@ -86,7 +52,27 @@ canvas{display:block;touch-action:manipulation}
 .lgt{font-size:9px;font-weight:500;color:var(--dim);white-space:nowrap;font-family:var(--m)}
 
 .outer{flex:1;min-height:0;position:relative;background:var(--bg)}
-canvas{display:block}
+canvas{display:block;touch-action:manipulation}
+
+/* ── 모바일 반응형 ── */
+@media(max-width:600px){
+  .topbar{height:40px}
+  .t-brand{padding:0 12px}
+  .t-title{display:none}
+  .t-idx{padding:0 10px}
+  .t-val{font-size:11px}
+  .t-status{padding:0 10px}
+  .stxt{display:none}
+  .fbar{height:30px;padding:0 8px}
+  .f-lbl{display:none}
+  .chip{padding:2px 8px;font-size:10px}
+  .lgbar{width:50px}
+  .btm{height:20px;padding:0 10px;font-size:8px}
+  .tt{position:fixed!important;left:8px!important;right:8px!important;bottom:24px!important;top:auto!important;max-width:none!important;min-width:0!important;width:calc(100% - 16px);border-radius:10px}
+}
+@media(max-width:380px){
+  .t-indices .t-idx:last-child{display:none}
+}
 
 .lov{position:absolute;inset:0;background:var(--bg);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;z-index:10}
 .lring{width:28px;height:28px;border-radius:50%;border:2px solid var(--border);border-top-color:var(--ac);animation:spin .8s cubic-bezier(.5,.1,.5,.9) infinite}
@@ -176,68 +162,6 @@ canvas{display:block}
 </footer>
 
 <script>
-/* ── 에러 방어막 ── */
-window.onerror=function(msg,src,line){
-  var lov=document.getElementById("lov");
-  if(lov) lov.style.display="flex";
-  var ltxt=document.getElementById("ltxt");
-  if(ltxt) ltxt.textContent="오류 발생";
-  var lsub=document.getElementById("lsub");
-  if(lsub) lsub.textContent=String(msg).slice(0,80)+" ("+line+")";
-  return false;
-};
-window.addEventListener("unhandledrejection",function(e){
-  var lov=document.getElementById("lov");
-  if(lov) lov.style.display="flex";
-  var ltxt=document.getElementById("ltxt");
-  if(ltxt) ltxt.textContent="Promise 오류";
-  var lsub=document.getElementById("lsub");
-  if(lsub) lsub.textContent=String(e.reason).slice(0,80);
-});
-
-/* ── Promise.any 폴리필 ── */
-if(!Promise.any){
-  Promise.any=function(ps){
-    return new Promise(function(resolve,reject){
-      var errs=[],done=0;
-      ps.forEach(function(p,i){
-        Promise.resolve(p).then(resolve,function(e){
-          errs[i]=e;
-          if(++done===ps.length) reject(new Error("All failed"));
-        });
-      });
-    });
-  };
-}
-
-/* ── AbortSignal.timeout 폴리필 ── */
-if(!AbortSignal.timeout){
-  AbortSignal.timeout=function(ms){
-    var c=new AbortController();
-    setTimeout(function(){c.abort();},ms);
-    return c.signal;
-  };
-}
-
-/* ── fetch에 강제 타임아웃 래퍼 ── */
-function fetchT(url,opts,ms){
-  return fetch(url,Object.assign({signal:AbortSignal.timeout(ms||8000)},opts||{}));
-}
-
-/* ── Canvas roundRect 폴리필 (iOS 15 이하 Safari) ── */
-if(!CanvasRenderingContext2D.prototype.roundRect){
-  CanvasRenderingContext2D.prototype.roundRect=function(x,y,w,h,r){
-    r=Math.min(r||0,w/2,h/2);
-    this.beginPath();
-    this.moveTo(x+r,y);
-    this.lineTo(x+w-r,y);this.arcTo(x+w,y,x+w,y+r,r);
-    this.lineTo(x+w,y+h-r);this.arcTo(x+w,y+h,x+w-r,y+h,r);
-    this.lineTo(x+r,y+h);this.arcTo(x,y+h,x,y+h-r,r);
-    this.lineTo(x,y+r);this.arcTo(x,y,x+r,y,r);
-    this.closePath();return this;
-  };
-}
-
 /* ════════════════════════════════
    STOCK DATA
 ════════════════════════════════ */
@@ -331,10 +255,40 @@ const chEl=document.getElementById("chips");
    3) 직접 호출 (운 좋으면 CORS 없이 통과)
 ════════════════════════════════ */
 
-// ★ Cloudflare Worker URL 설정 (있으면 최우선 사용)
-// proxy-worker.js를 Cloudflare Workers에 배포한 후 아래에 입력:
-// 예: const CF_WORKER = "https://kospi-proxy.유저명.workers.dev";
-const CF_WORKER = "https://wispy-wood-3ca4.okpika2006.workers.dev";
+// AbortSignal.timeout 폴리필
+if(!AbortSignal.timeout){
+  AbortSignal.timeout=function(ms){
+    const ctrl=new AbortController();
+    setTimeout(()=>ctrl.abort(),ms);
+    return ctrl.signal;
+  };
+}
+// Promise.any 폴리필
+if(!Promise.any){
+  Promise.any=function(ps){
+    return new Promise((res,rej)=>{
+      let n=ps.length,errs=[];
+      if(!n) return rej(new Error('empty'));
+      ps.forEach((p,i)=>Promise.resolve(p).then(res,e=>{errs[i]=e;if(!--n)rej(new Error('All failed'));}));
+    });
+  };
+}
+// Canvas roundRect 폴리필
+if(!CanvasRenderingContext2D.prototype.roundRect){
+  CanvasRenderingContext2D.prototype.roundRect=function(x,y,w,h,r){
+    r=Math.min(r||0,w/2,h/2);
+    this.beginPath();
+    this.moveTo(x+r,y);
+    this.lineTo(x+w-r,y);this.arcTo(x+w,y,x+w,y+r,r);
+    this.lineTo(x+w,y+h-r);this.arcTo(x+w,y+h,x+w-r,y+h,r);
+    this.lineTo(x+r,y+h);this.arcTo(x,y+h,x,y+h-r,r);
+    this.lineTo(x,y+r);this.arcTo(x,y,x+r,y,r);
+    this.closePath();return this;
+  };
+}
+
+// ★ Cloudflare Worker URL
+const CF_WORKER="https://wispy-wood-3ca4.okpika2006.workers.dev";
 
 let PD={},nextAt=0,REFRESH=3*60*1000; // 3분마다 갱신
 const TICKERS=SECTORS.flatMap(s=>s.stocks.map(st=>st.c+".KS"));
@@ -351,102 +305,50 @@ function yahooUrl(tickers){
   return `https://query2.finance.yahoo.com/v7/finance/quote?symbols=${tickers.join(",")}&fields=regularMarketChangePercent,regularMarketPrice,regularMarketPreviousClose&formatted=false&lang=ko-KR`;
 }
 
-/* 프록시 0: Cloudflare Worker (설정된 경우 최우선) */
-async function tryWorker(tickers){
-  if(!CF_WORKER) throw new Error("worker not configured");
-  const url=`${CF_WORKER}/quote?symbols=${tickers.join(",")}`;
-  const res=await fetchT(url,{},8000);
-  if(!res.ok) throw new Error("worker "+res.status);
-  const json=await res.json();
-  const rows=json?.quoteResponse?.result??[];
-  if(!rows.length) throw new Error("empty");
-  return rows;
-}
-
-/* 프록시 1: corsproxy.io — ?url= 방식 */
-async function tryCorsproxy(tickers){
-  const target=yahooUrl(tickers);
-  const url=`https://corsproxy.io/?url=${encodeURIComponent(target)}`;
-  const res=await fetchT(url,{headers:{"x-requested-with":"XMLHttpRequest"}},10000);
-  if(!res.ok) throw new Error("corsproxy "+res.status);
-  const json=await res.json();
-  const rows=json?.quoteResponse?.result??[];
-  if(!rows.length) throw new Error("empty");
-  return rows;
-}
-
-/* 프록시 2: allorigins.win */
-async function tryAllorigins(tickers){
-  const target=yahooUrl(tickers);
-  const url=`https://api.allorigins.win/get?url=${encodeURIComponent(target)}`;
-  const res=await fetchT(url,{},12000);
-  if(!res.ok) throw new Error("allorigins "+res.status);
-  const outer=await res.json();
-  const json=JSON.parse(outer.contents);
-  const rows=json?.quoteResponse?.result??[];
-  if(!rows.length) throw new Error("empty");
-  return rows;
-}
-
-/* 프록시 3: 직접 호출 (no-cors 아닌 cors mode — 운이 좋으면 통과) */
-async function tryDirect(tickers){
-  const url=yahooUrl(tickers);
-  const res=await fetchT(url,{headers:{"Accept":"application/json"}},8000);
-  if(!res.ok) throw new Error("direct "+res.status);
-  const json=await res.json();
-  const rows=json?.quoteResponse?.result??[];
-  if(!rows.length) throw new Error("empty");
-  return rows;
-}
-
-/* 메인 데이터 로드: 모든 프록시 동시 시도 → 가장 먼저 성공한 것 사용 */
+/* 메인 데이터 로드: Worker + allorigins 병렬 시도 → 먼저 성공한 것 사용 */
 async function loadData(){
-  // 각 프록시를 Promise로 변환 — 실패 시 reject
-  function makeAttempt(name, fn){
-    return fn(TICKERS).then(rows=>{
-      if(!rows||!rows.length) throw new Error("empty");
-      return {rows, name};
+  const sym=TICKERS.join(",");
+  const w=fetch(`${CF_WORKER}/quote?symbols=${sym}`,{signal:AbortSignal.timeout(10000)})
+    .then(r=>{if(!r.ok)throw new Error(r.status);return r.json();})
+    .then(j=>{
+      const rows=j?.quoteResponse?.result??[];
+      if(!rows.length)throw new Error("empty");
+      return{rows,name:"Worker"};
     });
-  }
-
-  const attempts=[
-    makeAttempt("Worker",     tryWorker),
-    makeAttempt("allorigins", tryAllorigins),
-  ];
-
-  // Promise.any: 가장 먼저 성공한 결과 반환
-  // 모두 실패하면 AggregateError throw
-  const {rows, name} = await Promise.any(attempts);
-
+  const ao=fetch(`https://api.allorigins.win/get?url=${encodeURIComponent(yahooUrl(TICKERS))}`,{signal:AbortSignal.timeout(12000)})
+    .then(r=>{if(!r.ok)throw new Error(r.status);return r.json();})
+    .then(b=>{
+      const rows=JSON.parse(b.contents)?.quoteResponse?.result??[];
+      if(!rows.length)throw new Error("empty");
+      return{rows,name:"allorigins"};
+    });
+  const{rows,name}=await Promise.any([w,ao]);
   let loaded=0;
   rows.forEach(q=>{
     const c=q.symbol.replace(".KS","");
-    const chg=q.regularMarketChangePercent??0;
-    const price=q.regularMarketPrice??0;
-    if(price>0){ PD[c]={chg:+chg.toFixed(2),price}; loaded++; }
+    if(q.regularMarketPrice){
+      PD[c]={chg:+(q.regularMarketChangePercent??0).toFixed(2),price:q.regularMarketPrice};
+      loaded++;
+    }
   });
-
-  return {n:loaded, proxy:name};
+  return{n:loaded,proxy:name};
 }
 
-/* 지수 로드 */
+/* 지수 로드: Worker + allorigins 병렬 */
 async function loadIdx(sym,vId,bId){
   const target=`https://query1.finance.yahoo.com/v8/finance/chart/${sym}?interval=1d&range=1d`;
-  const attempts=[
-    fetchT(`${CF_WORKER}/chart?symbol=${sym}`,{},6000)
-      .then(r=>r.ok?r.json():Promise.reject()),
-    fetchT(`https://api.allorigins.win/get?url=${encodeURIComponent(target)}`,{},8000)
-      .then(r=>r.ok?r.json():Promise.reject())
-      .then(b=>JSON.parse(b.contents)),
-  ];
+  const parse=body=>{
+    const d=body.contents?JSON.parse(body.contents):body;
+    const m=d?.chart?.result?.[0]?.meta;
+    if(!m?.regularMarketPrice)throw new Error("no data");
+    return m;
+  };
   try{
-    const body=await Promise.any(attempts);
-    const parsed=body.chart?body:body;
-    const m=parsed?.chart?.result?.[0]?.meta;
-    if(m?.regularMarketPrice){
-      const chg=((m.regularMarketPrice-m.chartPreviousClose)/m.chartPreviousClose)*100;
-      setIdx(vId,bId,m.regularMarketPrice,chg);
-    }
+    const m=await Promise.any([
+      fetch(`${CF_WORKER}/chart?symbol=${sym}`,{signal:AbortSignal.timeout(8000)}).then(r=>r.ok?r.json():Promise.reject()).then(parse),
+      fetch(`https://api.allorigins.win/get?url=${encodeURIComponent(target)}`,{signal:AbortSignal.timeout(10000)}).then(r=>r.ok?r.json():Promise.reject()).then(parse),
+    ]);
+    setIdx(vId,bId,m.regularMarketPrice,((m.regularMarketPrice-m.chartPreviousClose)/m.chartPreviousClose)*100);
   }catch(e){}
 }
 
@@ -455,28 +357,24 @@ async function loadAll(){
   const updEl=document.getElementById("upd");
   const srcEl=document.getElementById("src");
   try{
-    const {n,proxy}=await loadData();
+    const{n,proxy}=await loadData();
+    // 스파크라인 캐시 초기화
+    Object.keys(SPARK_CACHE).forEach(k=>delete SPARK_CACHE[k]);
     sdot.className="sdot live";
     updEl.textContent=new Date().toLocaleTimeString("ko-KR",{hour:"2-digit",minute:"2-digit",second:"2-digit"})+" 업데이트";
     srcEl.textContent=`Yahoo Finance (${proxy}) · ${n}개 · 클릭 시 네이버 금융`;
   }catch(e){
-    console.error("데이터 로드 실패:",e);
-    // 기존 데이터 없는 종목만 데모로 채움
     SECTORS.flatMap(s=>s.stocks).forEach(st=>{
-      if(!PD[st.c]) PD[st.c]={chg:+(Math.random()*10-5).toFixed(2),price:0};
+      if(!PD[st.c])PD[st.c]={chg:+(Math.random()*10-5).toFixed(2),price:0};
     });
     sdot.className="sdot err";
     updEl.textContent="데이터 로드 실패";
-    srcEl.textContent="실시간 데이터 불가 · 데모 표시 중 · 클릭 시 네이버 금융";
+    srcEl.textContent="데모 데이터 · 클릭 시 네이버 금융";
   }
-  // 지수 로드 — 전체 10초 타임아웃
-  const idxTimeout=new Promise(r=>setTimeout(r,10000));
+  // 지수 로드 — 최대 10초
   await Promise.race([
-    Promise.allSettled([
-      loadIdx("%5EKS11","kv","kb"),
-      loadIdx("%5EKQ11","qv","qb"),
-    ]),
-    idxTimeout,
+    Promise.allSettled([loadIdx("%5EKS11","kv","kb"),loadIdx("%5EKQ11","qv","qb")]),
+    new Promise(r=>setTimeout(r,10000)),
   ]);
 }
 
@@ -703,7 +601,7 @@ const TC={};
 function tmw(t,fs,bold){
   const k=`${t}|${fs}|${bold}`;
   if(TC[k]!==undefined)return TC[k];
-  ctx.font=`${bold?"700":"400"} ${fs}px -apple-system,BlinkMacSystemFont,sans-serif`;
+  ctx.font=`${bold?"700":"400"} ${fs}px -apple-system,sans-serif`;
   return(TC[k]=ctx.measureText(t).width);
 }
 function fitFs(t,maxW,maxFs,bold){
@@ -738,7 +636,17 @@ function drawTile(r, prog){
 
   ctx.fillStyle=bgColor;
   ctx.beginPath();
-  ctx.roundRect(tx,ty,tw,th,2);
+  if(ctx.roundRect){
+    ctx.roundRect(tx,ty,tw,th,2);
+  } else {
+    const r2=2;
+    ctx.moveTo(tx+r2,ty);
+    ctx.lineTo(tx+tw-r2,ty); ctx.arcTo(tx+tw,ty,tx+tw,ty+r2,r2);
+    ctx.lineTo(tx+tw,ty+th-r2); ctx.arcTo(tx+tw,ty+th,tx+tw-r2,ty+th,r2);
+    ctx.lineTo(tx+r2,ty+th); ctx.arcTo(tx,ty+th,tx,ty+th-r2,r2);
+    ctx.lineTo(tx,ty+r2); ctx.arcTo(tx,ty,tx+r2,ty,r2);
+    ctx.closePath();
+  }
   ctx.fill();
 
   ctx.strokeStyle=bdColor;
@@ -766,15 +674,15 @@ function drawTile(r, prog){
   if(showChg){
     const block=nfs+gap+cfs;
     const ny=ty+th/2-block/2+nfs/2;
-    ctx.font=`700 ${nfs}px -apple-system,BlinkMacSystemFont,sans-serif`;
+    ctx.font=`700 ${nfs}px -apple-system,sans-serif`;
     ctx.fillStyle="rgba(255,255,255,.97)";
     ctx.textBaseline="middle";
     ctx.fillText(r.n,cx2,ny);
-    ctx.font=`500 ${cfs}px 'SF Mono','Consolas',monospace`;
+    ctx.font=`500 ${cfs}px -apple-system,monospace`;
     ctx.fillStyle="rgba(255,255,255,.65)";
     ctx.fillText(chgT,cx2,ny+nfs/2+gap+cfs/2);
   } else {
-    ctx.font=`700 ${nfs}px -apple-system,BlinkMacSystemFont,sans-serif`;
+    ctx.font=`700 ${nfs}px -apple-system,sans-serif`;
     ctx.fillStyle="rgba(255,255,255,.97)";
     ctx.textBaseline="middle";
     ctx.fillText(r.n,cx2,ty+th/2);
@@ -831,7 +739,7 @@ function draw(){
     ctx.fillRect(bx,by,bw,S_HDR);
 
     /* 섹터명 — muted grey #868993, 좌측 상단 */
-    ctx.font=`500 10px -apple-system,BlinkMacSystemFont,sans-serif`;
+    ctx.font=`500 10px -apple-system,sans-serif`;
     ctx.textAlign="left";
     ctx.textBaseline="middle";
     ctx.fillStyle="#868993";
@@ -844,7 +752,7 @@ function draw(){
     if(bw>80){
       const tot=sec.stocks.reduce((a,st)=>a+st.cap,0);
       const wav=sec.stocks.reduce((a,st)=>a+(PD[st.c]?.chg??0)*st.cap,0)/tot;
-      ctx.font=`500 9px 'SF Mono','Consolas',monospace`;
+      ctx.font=`500 9px -apple-system,monospace`;
       ctx.textAlign="right";
       ctx.fillStyle=wav>=0?"rgba(226,43,43,.9)":"rgba(23,99,178,.9)";
       ctx.fillText((wav>=0?"+":"")+wav.toFixed(2)+"%",bx+bw-8,by+S_HDR/2);
@@ -876,42 +784,60 @@ function animHover(){
 /* ════════════════════════════════
    SPARKLINE
 ════════════════════════════════ */
-const SPARK_CACHE={};
-function clearSparkCache(){Object.keys(SPARK_CACHE).forEach(k=>delete SPARK_CACHE[k]);}
+/* 종목 코드를 시드로 하는 고정 난수 — 같은 종목은 항상 같은 모양 */
+function seededRand(seed){
+  let s=seed;
+  return function(){
+    s=(s*1664525+1013904223)&0xffffffff;
+    return(s>>>0)/0xffffffff;
+  };
+}
 
-function drawSparkline(can,chg,code){
+/* 스파크라인 포인트 캐시: 종목코드 → pts 배열 */
+const SPARK_CACHE={};
+
+function getSparkPts(code, chg){
+  if(SPARK_CACHE[code]) return SPARK_CACHE[code];
+  // 종목 코드를 숫자 시드로 변환
+  const seed=code.split("").reduce((a,c)=>a+c.charCodeAt(0),0)*31+Math.round(chg*100);
+  const rand=seededRand(seed);
+  const N=40, pts=[];
+  const drift=chg/N*0.6;
+  let v=0;
+  for(let i=0;i<N;i++){
+    v+=(rand()-0.48+drift)*0.55;
+    pts.push(v);
+  }
+  SPARK_CACHE[code]=pts;
+  return pts;
+}
+
+function drawSparkline(can, chg, code){
   const sc=can.getContext("2d");
-  const W=can.width,H=can.height;
+  const W=can.width, H=can.height;
   sc.clearRect(0,0,W,H);
 
-  let pts;
-  if(code){
-    if(!SPARK_CACHE[code]){
-      // 시드 기반 고정 난수로 포인트 생성
-      let s=code.split("").reduce((a,c)=>a+c.charCodeAt(0),0)*31+Math.round(chg*100);
-      const rand=()=>{s=(s*1664525+1013904223)&0xffffffff;return(s>>>0)/0xffffffff;};
-      const drift=chg/40*0.6;let v=0;pts=[];
-      for(let i=0;i<40;i++){v+=(rand()-.48+drift)*0.55;pts.push(v);}
-      SPARK_CACHE[code]=pts;
-    }
-    pts=SPARK_CACHE[code];
-  } else {
-    const drift=chg/40*0.8;let v=0;pts=[];
-    for(let i=0;i<40;i++){v+=(Math.random()-.48+drift*.5)*.6;pts.push(v);}
-  }
-
-  const mn=Math.min(...pts),mx=Math.max(...pts),range=mx-mn||1;
+  const pts=getSparkPts(code, chg);
+  const mn=Math.min(...pts), mx=Math.max(...pts), range=mx-mn||1;
   const col=chg>=0?"#e22b2b":"#1763b2";
+
   sc.beginPath();
   pts.forEach((p,i)=>{
-    const px=i/(pts.length-1)*W,py=H-4-((p-mn)/range)*(H-8);
+    const px=i/(pts.length-1)*W;
+    const py=H-4-((p-mn)/range)*(H-8);
     i===0?sc.moveTo(px,py):sc.lineTo(px,py);
   });
-  sc.strokeStyle=col;sc.lineWidth=1.5;sc.stroke();
-  sc.lineTo(W,H-4-((pts[pts.length-1]-mn)/range)*(H-8));
-  sc.lineTo(W,H);sc.lineTo(0,H);sc.closePath();
-  sc.fillStyle=chg>=0?"rgba(226,43,43,.15)":"rgba(23,99,178,.18)";sc.fill();
+  sc.strokeStyle=col; sc.lineWidth=1.5; sc.stroke();
+
+  const ly=H-4-((pts[pts.length-1]-mn)/range)*(H-8);
+  sc.lineTo(W,ly); sc.lineTo(W,H); sc.lineTo(0,H);
+  sc.closePath();
+  sc.fillStyle=chg>=0?"rgba(226,43,43,.15)":"rgba(23,99,178,.18)";
+  sc.fill();
 }
+
+/* 데이터 갱신 시 스파크라인 캐시 초기화 */
+function clearSparkCache(){ Object.keys(SPARK_CACHE).forEach(k=>delete SPARK_CACHE[k]); }
 
 /* ════════════════════════════════
    INTERACTION
@@ -937,7 +863,7 @@ cv.addEventListener("mousemove",e=>{
     const ch=document.getElementById("tt-ch");ch.textContent=sign+r.chg.toFixed(2)+"%";ch.className="tt-rv "+cls;
     const bd=document.getElementById("tt-bd");bd.textContent=sign+r.chg.toFixed(2)+"%";bd.className="tt-badge "+cls;
     document.getElementById("tt-sc").textContent=r.sector;
-    drawSparkline(document.getElementById("tt-sp"),r.chg,r.c);
+    drawSparkline(document.getElementById("tt-sp"), r.chg, r.c);
     tt.style.display="block";
     let lx=e.clientX+16,ly=e.clientY-14;
     if(lx+240>innerWidth)lx=e.clientX-248;
@@ -951,59 +877,41 @@ cv.addEventListener("click",e=>{
   if(idx>=0)window.open(`https://finance.naver.com/item/main.naver?code=${tiles[idx].c}`,"_blank");
 });
 
-/* ── 터치 이벤트 (모바일) ── */
-function showTip(r){
-  const full=SECTORS.flatMap(s=>s.stocks).find(st=>st.c===r.c)?.full??r.n;
-  const sign=r.chg>=0?"+":"",cls=r.chg>0.05?"u":r.chg<-0.05?"d":"";
-  document.getElementById("tt-tk").textContent=r.n;
-  document.getElementById("tt-nm").textContent=full;
-  document.getElementById("tt-pr").textContent=r.price?r.price.toLocaleString("ko-KR")+"원":"—";
-  const ch=document.getElementById("tt-ch");ch.textContent=sign+r.chg.toFixed(2)+"%";ch.className="tt-rv "+cls;
-  const bd=document.getElementById("tt-bd");bd.textContent=sign+r.chg.toFixed(2)+"%";bd.className="tt-badge "+cls;
-  document.getElementById("tt-sc").textContent=r.sector;
-  drawSparkline(document.getElementById("tt-sp"),r.chg,r.c);
-  tt.style.display="block";
-}
 /* ── 터치 이벤트 ── */
-let _touchStartX=0,_touchStartY=0,_touchIdx=-1,_moved=false;
-
+let tSX=0,tSY=0,tIdx=-1,tMoved=false;
 cv.addEventListener("touchstart",e=>{
   const t=e.touches[0];
-  _touchStartX=t.clientX;
-  _touchStartY=t.clientY;
-  _moved=false;
+  tSX=t.clientX;tSY=t.clientY;tMoved=false;
   const rc=cv.getBoundingClientRect();
-  const idx=hit(t.clientX-rc.left,t.clientY-rc.top);
-  _touchIdx=idx;
-  if(idx>=0){
-    hovIdx=idx;hovProgress=1;draw();
-    showTip(tiles[idx]);
+  tIdx=hit(t.clientX-rc.left,t.clientY-rc.top);
+  if(tIdx>=0){
+    hovIdx=tIdx;hovProgress=1;draw();
+    const r=tiles[tIdx];
+    const full=SECTORS.flatMap(s=>s.stocks).find(st=>st.c===r.c)?.full??r.n;
+    const sign=r.chg>=0?"+":"",cls=r.chg>0.05?"u":r.chg<-0.05?"d":"";
+    document.getElementById("tt-tk").textContent=r.n;
+    document.getElementById("tt-nm").textContent=full;
+    document.getElementById("tt-pr").textContent=r.price?r.price.toLocaleString("ko-KR")+"원":"—";
+    const ch=document.getElementById("tt-ch");ch.textContent=sign+r.chg.toFixed(2)+"%";ch.className="tt-rv "+cls;
+    const bd=document.getElementById("tt-bd");bd.textContent=sign+r.chg.toFixed(2)+"%";bd.className="tt-badge "+cls;
+    document.getElementById("tt-sc").textContent=r.sector;
+    drawSparkline(document.getElementById("tt-sp"),r.chg,r.c);
+    tt.style.display="block";
   }
 },{passive:false});
 
 cv.addEventListener("touchmove",e=>{
-  const t=e.touches[0];
-  const dx=Math.abs(t.clientX-_touchStartX);
-  const dy=Math.abs(t.clientY-_touchStartY);
-  if(dx>8||dy>8){
-    _moved=true;
-    tt.style.display="none";
-    hovIdx=-1;hovProgress=0;
-    draw();
+  if(Math.abs(e.touches[0].clientX-tSX)>8||Math.abs(e.touches[0].clientY-tSY)>8){
+    tMoved=true;tt.style.display="none";hovIdx=-1;hovProgress=0;draw();
   }
 },{passive:true});
 
 cv.addEventListener("touchend",e=>{
-  if(!_moved&&_touchIdx>=0){
-    const code=tiles[_touchIdx]?.c;
-    if(code) window.open("https://finance.naver.com/item/main.naver?code="+code,"_blank");
+  // touchend 핸들러 안에서 직접 open → 팝업 차단 우회
+  if(!tMoved&&tIdx>=0){
+    window.open(`https://finance.naver.com/item/main.naver?code=${tiles[tIdx].c}`,"_blank");
   }
-  setTimeout(()=>{
-    tt.style.display="none";
-    hovIdx=-1;hovProgress=0;
-    _touchIdx=-1;
-    draw();
-  },300);
+  tt.style.display="none";hovIdx=-1;hovProgress=0;tIdx=-1;draw();
 },{passive:true});
 
 /* ════════════════════════════════
@@ -1021,14 +929,12 @@ async function loop(){
   if(loopTimer){clearTimeout(loopTimer);loopTimer=null;}
   document.getElementById("lov").style.display="flex";
   document.getElementById("ltxt").textContent="데이터 불러오는 중...";
-  document.getElementById("lsub").textContent="Yahoo Finance 연결 시도 중";
+  document.getElementById("lsub").textContent="";
   try{
     await loadAll();
   }catch(e){
-    console.error("loop error:",e);
-    // 실패해도 데모 데이터로 채움
     SECTORS.flatMap(s=>s.stocks).forEach(st=>{
-      if(!PD[st.c]) PD[st.c]={chg:+(Math.random()*6-3).toFixed(2),price:0};
+      if(!PD[st.c])PD[st.c]={chg:+(Math.random()*6-3).toFixed(2),price:0};
     });
   }finally{
     document.getElementById("lov").style.display="none";
