@@ -963,26 +963,52 @@ function showTip(r){
   drawSparkline(document.getElementById("tt-sp"),r.chg,r.c);
   tt.style.display="block";
 }
-let _touchTimer=null,_lastIdx=-1;
+/* ── 터치 이벤트 ── */
+let _touchStartX=0,_touchStartY=0,_touchIdx=-1,_moved=false;
+
 cv.addEventListener("touchstart",e=>{
-  e.preventDefault();
-  const t=e.touches[0],rc=cv.getBoundingClientRect();
+  const t=e.touches[0];
+  _touchStartX=t.clientX;
+  _touchStartY=t.clientY;
+  _moved=false;
+  const rc=cv.getBoundingClientRect();
   const idx=hit(t.clientX-rc.left,t.clientY-rc.top);
-  _lastIdx=idx;
-  if(idx>=0){hovIdx=idx;hovProgress=1;draw();showTip(tiles[idx]);}
-  if(_touchTimer)clearTimeout(_touchTimer);
-  _touchTimer=setTimeout(()=>{
-    tt.style.display="none";hovIdx=-1;hovProgress=0;draw();
-    if(_lastIdx>=0){window.open(`https://finance.naver.com/item/main.naver?code=${tiles[_lastIdx].c}`,"_blank");_lastIdx=-1;}
-  },700);
-},{passive:false});
-cv.addEventListener("touchend",e=>{e.preventDefault();},{passive:false});
+  _touchIdx=idx;
+  if(idx>=0){
+    hovIdx=idx;hovProgress=1;draw();
+    showTip(tiles[idx]);
+  }
+},{passive:true}); // passive:true → 스크롤 허용
+
 cv.addEventListener("touchmove",e=>{
-  e.preventDefault();
-  tt.style.display="none";hovIdx=-1;hovProgress=0;_lastIdx=-1;
-  if(_touchTimer){clearTimeout(_touchTimer);_touchTimer=null;}
-  draw();
-},{passive:false});
+  const t=e.touches[0];
+  const dx=Math.abs(t.clientX-_touchStartX);
+  const dy=Math.abs(t.clientY-_touchStartY);
+  if(dx>8||dy>8){
+    _moved=true;
+    // 스크롤 중이면 툴팁 숨김
+    tt.style.display="none";
+    hovIdx=-1;hovProgress=0;
+    draw();
+  }
+},{passive:true}); // passive:true → 스크롤 허용
+
+cv.addEventListener("touchend",e=>{
+  // 터치 이벤트 핸들러 안에서 직접 window.open → 팝업 차단 우회
+  if(!_moved && _touchIdx>=0){
+    const code=tiles[_touchIdx]?.c;
+    if(code){
+      window.open("https://finance.naver.com/item/main.naver?code="+code,"_blank");
+    }
+  }
+  // 툴팁 잠시 후 닫기
+  setTimeout(()=>{
+    tt.style.display="none";
+    hovIdx=-1;hovProgress=0;
+    _touchIdx=-1;
+    draw();
+  },300);
+},{passive:true});
 
 /* ════════════════════════════════
    REFRESH LOOP
