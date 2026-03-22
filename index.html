@@ -287,10 +287,11 @@ if(!CanvasRenderingContext2D.prototype.roundRect){
   };
 }
 
-// ★ Cloudflare Worker URL (KIS API 프록시)
+// ★ Cloudflare Worker URL (토큰 발급 전용)
 const CF_WORKER="https://wispy-wood-3ca4.okpika2006.workers.dev";
+const KIS_WS="wss://openapi.koreainvestment.com:21000";
 
-let PD={},nextAt=0,REFRESH=60*1000; // 1분마다 갱신 (KIS 실시간에 가까운 데이터)
+let PD={},nextAt=0,REFRESH=60*1000;
 const TICKERS=SECTORS.flatMap(s=>s.stocks.map(st=>st.c));
 
 function setIdx(vId,bId,val,chg){
@@ -300,53 +301,180 @@ function setIdx(vId,bId,val,chg){
   el.className="t-chg "+(chg>=0?"u":"d");
 }
 
-/* KIS 종목 시세 로드 */
-async function loadData(){
+/* ── REST 초기 시세 로드 ── */
+async function loadInitialData(){
   const sym=TICKERS.join(",");
-  const res=await fetch(`${CF_WORKER}/quote?symbols=${sym}`,{signal:AbortSignal.timeout(15000)});
-  if(!res.ok) throw new Error("quote "+res.status);
+  const res=await fetch(`${CF_WORKER}/price?symbols=${sym}`,{signal:AbortSignal.timeout(20000)});
+  if(!res.ok) throw new Error("price "+res.status);
   const j=await res.json();
-  if(!j.quotes?.length) throw new Error("empty");
+  if(j.error) throw new Error(j.error);
   let loaded=0;
-  j.quotes.forEach(q=>{
+  (j.quotes||[]).forEach(q=>{
     PD[q.symbol]={chg:q.chgPct, price:q.price};
     loaded++;
   });
-  return {n:loaded, proxy:"KIS"};
+  return loaded;
 }
 
-/* KIS 지수 로드 */
+/* ── 지수 로드 (REST) ── */
 async function loadIdx(){
-  const res=await fetch(`${CF_WORKER}/index`,{signal:AbortSignal.timeout(10000)});
-  if(!res.ok) throw new Error("index "+res.status);
+  // KIS 지수는 WebSocket으로도 받을 수 있지만 초기값은 REST로
+  try{
+    const res=await fetch(`${CF_WORKER}/price?symbols=U0001,U1001`,{signal:AbortSignal.timeout(8000)});
+    if(!res.ok) return;
+    const j=await res.json();
+    // 지수는 별도 TR이 필요해서 여기서는 생략 — WebSocket으로 처리
+  }catch(e){}
+}
+
+/* ════════════════════════════════
+   KIS WebSocket 실시간 시세
+════════════════════════════════ */
+let ws=null, wsKey="", wsReconnTimer=null;
+let wsSubscribed=new Set();
+
+async function getWsKey(){
+  const res=await fetch(`${CF_WORKER}/wskey`,{signal:AbortSignal.timeout(10000)});
+  if(!res.ok) throw new Error("wskey "+res.status);
   const j=await res.json();
-  if(j.kospi)  setIdx("kv","kb",j.kospi.price, j.kospi.chgPct);
-  if(j.kosdaq) setIdx("qv","qb",j.kosdaq.price,j.kosdaq.chgPct);
+  if(!j.approval_key) throw new Error(j.error||"no wskey");
+  return j.approval_key;
+}
+
+function wsSend(obj){
+  if(ws&&ws.readyState===WebSocket.OPEN) ws.send(JSON.stringify(obj));
+}
+
+/* 실시간 시세 구독 요청 */
+function subscribeStock(code, key){
+  wsSend({
+    header:{
+      approval_key: key,
+      custtype:     "P",
+      tr_type:      "1",   // 1=등록
+      "content-type":"utf-8",
+    },
+    body:{
+      input:{
+        tr_id:   "H0STCNT0",  // 주식 체결가
+        tr_key:  code,
+      },
+    },
+  });
+}
+
+/* KOSPI/KOSDAQ 지수 구독 */
+function subscribeIndex(key){
+  ["0001","1001"].forEach(code=>{
+    wsSend({
+      header:{
+        approval_key: key,
+        custtype:     "P",
+        tr_type:      "1",
+        "content-type":"utf-8",
+      },
+      body:{input:{tr_id:"H0UPCNT0", tr_key:code}},
+    });
+  });
+}
+
+/* WebSocket 메시지 파싱 */
+function onWsMessage(e){
+  // 시스템 메시지 (JSON)
+  if(e.data.startsWith("{")){
+    try{
+      const j=JSON.parse(e.data);
+      const body=j.body;
+      if(!body) return;
+      // PINGPONG
+      if(j.header?.tr_id==="PINGPONG"){
+        wsSend({header:{tr_id:"PINGPONG"}});
+        return;
+      }
+    }catch(err){}
+    return;
+  }
+
+  // 실시간 데이터 (|구분자)
+  const parts=e.data.split("|");
+  if(parts.length<4) return;
+  const trId=parts[1];
+  const data=parts[3].split("^");
+
+  if(trId==="H0STCNT0"){
+    // 주식 체결
+    // data[0]=종목코드, data[2]=체결가, data[4]=등락률, data[5]=전일대비
+    const code   = data[0];
+    const price  = parseInt(data[2], 10)||0;
+    const chgPct = parseFloat(data[4])||0;
+    if(code && price){
+      const prev=PD[code];
+      PD[code]={chg:chgPct, price};
+      // 가격 변동 있을 때만 리드로
+      if(!prev||prev.price!==price||prev.chg!==chgPct){
+        draw();
+      }
+    }
+  } else if(trId==="H0UPCNT0"){
+    // 지수
+    // data[0]=지수코드, data[2]=현재지수, data[4]=등락률
+    const code   = data[0];
+    const price  = parseFloat(data[2])||0;
+    const chgPct = parseFloat(data[4])||0;
+    if(code==="0001" && price) setIdx("kv","kb",price,chgPct);
+    if(code==="1001" && price) setIdx("qv","qb",price,chgPct);
+  }
+}
+
+async function connectWs(){
+  if(ws) ws.close();
+  try{
+    wsKey=await getWsKey();
+    ws=new WebSocket(KIS_WS);
+    ws.onopen=()=>{
+      console.log("KIS WebSocket 연결됨");
+      document.getElementById("sdot").className="sdot live";
+      document.getElementById("upd").textContent="실시간 연결됨";
+      // 모든 종목 구독
+      TICKERS.forEach(code=>subscribeStock(code,wsKey));
+      // 지수 구독
+      subscribeIndex(wsKey);
+    };
+    ws.onmessage=onWsMessage;
+    ws.onerror=e=>console.warn("WS error",e);
+    ws.onclose=e=>{
+      console.log("WS closed",e.code);
+      document.getElementById("sdot").className="sdot err";
+      document.getElementById("upd").textContent="연결 끊김 — 재연결 중...";
+      // 5초 후 재연결
+      if(wsReconnTimer) clearTimeout(wsReconnTimer);
+      wsReconnTimer=setTimeout(connectWs, 5000);
+    };
+  }catch(err){
+    console.error("WS 연결 실패:",err.message);
+    document.getElementById("sdot").className="sdot err";
+    document.getElementById("upd").textContent="연결 실패: "+err.message;
+    if(wsReconnTimer) clearTimeout(wsReconnTimer);
+    wsReconnTimer=setTimeout(connectWs,10000);
+  }
 }
 
 async function loadAll(){
-  const sdot=document.getElementById("sdot");
-  const updEl=document.getElementById("upd");
   const srcEl=document.getElementById("src");
   try{
-    const{n,proxy}=await loadData();
+    const n=await loadInitialData();
     Object.keys(SPARK_CACHE).forEach(k=>delete SPARK_CACHE[k]);
-    sdot.className="sdot live";
-    updEl.textContent=new Date().toLocaleTimeString("ko-KR",{hour:"2-digit",minute:"2-digit",second:"2-digit"})+" 업데이트";
-    srcEl.textContent=`KIS Open API (실시간) · ${n}개 · 클릭 시 네이버 금융`;
+    srcEl.textContent=`KIS Open API · ${n}개 초기 로드 · 실시간 연결 중...`;
   }catch(e){
     SECTORS.flatMap(s=>s.stocks).forEach(st=>{
       if(!PD[st.c])PD[st.c]={chg:+(Math.random()*10-5).toFixed(2),price:0};
     });
-    sdot.className="sdot err";
-    updEl.textContent="데이터 로드 실패";
+    document.getElementById("sdot").className="sdot err";
+    document.getElementById("upd").textContent="초기 로드 실패";
     srcEl.textContent="데모 데이터 · 클릭 시 네이버 금융";
   }
-  // 지수 로드 — 최대 10초
-  await Promise.race([
-    loadIdx().catch(()=>{}),
-    new Promise(r=>setTimeout(r,10000)),
-  ]);
+  // WebSocket 실시간 연결
+  await connectWs();
 }
 
 /* ════════════════════════════════
@@ -900,7 +1028,7 @@ async function loop(){
   if(loopTimer){clearTimeout(loopTimer);loopTimer=null;}
   document.getElementById("lov").style.display="flex";
   document.getElementById("ltxt").textContent="데이터 불러오는 중...";
-  document.getElementById("lsub").textContent="";
+  document.getElementById("lsub").textContent="KIS API 연결 중...";
   try{
     await loadAll();
   }catch(e){
@@ -912,7 +1040,10 @@ async function loop(){
     draw();
   }
   nextAt=Date.now()+REFRESH;
-  loopTimer=setTimeout(loop,REFRESH);
+  // WebSocket이 살아있으면 루프 불필요, 끊어지면 재시도
+  loopTimer=setTimeout(()=>{
+    if(!ws||ws.readyState!==WebSocket.OPEN) loop();
+  },REFRESH);
 }
 
 // 하단 '갱신' 텍스트 클릭 시 즉시 갱신
