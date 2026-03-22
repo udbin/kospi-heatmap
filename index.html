@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>KOSPI Heatmap</title>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Roboto+Mono:wght@400;500&display=swap" rel="stylesheet">
+<!-- Google Fonts는 모바일에서 로딩 블로킹 유발 가능 → 시스템 폰트 사용 -->
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
@@ -15,8 +15,8 @@
   --dim:#555c6e;--muted:#868993;--mid:#9ba3b2;--bright:#d1d4dc;--full:#fff;
   --up:#e22b2b;--dn:#1763b2;--flat:#2a2e39;
   --ac:#2962ff;
-  --f:'Inter',system-ui,sans-serif;
-  --m:'Roboto Mono','Fira Code',monospace;
+  --f:-apple-system,BlinkMacSystemFont,'Segoe UI','Helvetica Neue',Arial,sans-serif;
+  --m:'SF Mono','Fira Code','Consolas','Courier New',monospace;
 }
 html,body{height:100%;overflow:hidden}
 body{font-family:var(--f);background:var(--bg);color:var(--bright);display:flex;flex-direction:column;height:100vh;height:100dvh;-webkit-font-smoothing:antialiased;-webkit-text-size-adjust:100%}
@@ -177,11 +177,23 @@ canvas{display:block}
 
 <script>
 /* ── 에러 방어막 ── */
-window.onerror=function(msg,_,line){
-  var l=document.getElementById("lov");if(l)l.style.display="flex";
-  var t=document.getElementById("ltxt");if(t)t.textContent="오류: "+msg+" (line "+line+")";
+window.onerror=function(msg,src,line){
+  var lov=document.getElementById("lov");
+  if(lov) lov.style.display="flex";
+  var ltxt=document.getElementById("ltxt");
+  if(ltxt) ltxt.textContent="오류 발생";
+  var lsub=document.getElementById("lsub");
+  if(lsub) lsub.textContent=String(msg).slice(0,80)+" ("+line+")";
   return false;
 };
+window.addEventListener("unhandledrejection",function(e){
+  var lov=document.getElementById("lov");
+  if(lov) lov.style.display="flex";
+  var ltxt=document.getElementById("ltxt");
+  if(ltxt) ltxt.textContent="Promise 오류";
+  var lsub=document.getElementById("lsub");
+  if(lsub) lsub.textContent=String(e.reason).slice(0,80);
+});
 
 /* ── Canvas roundRect 폴리필 (iOS 15 이하 Safari) ── */
 if(!CanvasRenderingContext2D.prototype.roundRect){
@@ -668,7 +680,7 @@ const TC={};
 function tmw(t,fs,bold){
   const k=`${t}|${fs}|${bold}`;
   if(TC[k]!==undefined)return TC[k];
-  ctx.font=`${bold?"700":"400"} ${fs}px 'Inter',system-ui,sans-serif`;
+  ctx.font=`${bold?"700":"400"} ${fs}px -apple-system,BlinkMacSystemFont,sans-serif`;
   return(TC[k]=ctx.measureText(t).width);
 }
 function fitFs(t,maxW,maxFs,bold){
@@ -731,15 +743,15 @@ function drawTile(r, prog){
   if(showChg){
     const block=nfs+gap+cfs;
     const ny=ty+th/2-block/2+nfs/2;
-    ctx.font=`700 ${nfs}px 'Inter',system-ui,sans-serif`;
+    ctx.font=`700 ${nfs}px -apple-system,BlinkMacSystemFont,sans-serif`;
     ctx.fillStyle="rgba(255,255,255,.97)";
     ctx.textBaseline="middle";
     ctx.fillText(r.n,cx2,ny);
-    ctx.font=`500 ${cfs}px 'Roboto Mono',monospace`;
+    ctx.font=`500 ${cfs}px 'SF Mono','Consolas',monospace`;
     ctx.fillStyle="rgba(255,255,255,.65)";
     ctx.fillText(chgT,cx2,ny+nfs/2+gap+cfs/2);
   } else {
-    ctx.font=`700 ${nfs}px 'Inter',system-ui,sans-serif`;
+    ctx.font=`700 ${nfs}px -apple-system,BlinkMacSystemFont,sans-serif`;
     ctx.fillStyle="rgba(255,255,255,.97)";
     ctx.textBaseline="middle";
     ctx.fillText(r.n,cx2,ty+th/2);
@@ -796,7 +808,7 @@ function draw(){
     ctx.fillRect(bx,by,bw,S_HDR);
 
     /* 섹터명 — muted grey #868993, 좌측 상단 */
-    ctx.font=`500 10px 'Inter',system-ui,sans-serif`;
+    ctx.font=`500 10px -apple-system,BlinkMacSystemFont,sans-serif`;
     ctx.textAlign="left";
     ctx.textBaseline="middle";
     ctx.fillStyle="#868993";
@@ -809,7 +821,7 @@ function draw(){
     if(bw>80){
       const tot=sec.stocks.reduce((a,st)=>a+st.cap,0);
       const wav=sec.stocks.reduce((a,st)=>a+(PD[st.c]?.chg??0)*st.cap,0)/tot;
-      ctx.font=`500 9px 'Roboto Mono',monospace`;
+      ctx.font=`500 9px 'SF Mono','Consolas',monospace`;
       ctx.textAlign="right";
       ctx.fillStyle=wav>=0?"rgba(226,43,43,.9)":"rgba(23,99,178,.9)";
       ctx.fillText((wav>=0?"+":"")+wav.toFixed(2)+"%",bx+bw-8,by+S_HDR/2);
