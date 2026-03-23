@@ -345,37 +345,26 @@ function wsSend(obj){
   if(ws&&ws.readyState===WebSocket.OPEN) ws.send(JSON.stringify(obj));
 }
 
-/* 실시간 시세 구독 요청 */
-function subscribeStock(code, key){
-  wsSend({
-    header:{
-      approval_key: key,
-      custtype:     "P",
-      tr_type:      "1",   // 1=등록
-      "content-type":"utf-8",
-    },
-    body:{
-      input:{
-        tr_id:   "H0STCNT0",  // 주식 체결가
-        tr_key:  code,
-      },
-    },
-  });
-}
+/* 실시간 시세 구독 — 딜레이 주면서 순차 등록 */
+function delay(ms){return new Promise(r=>setTimeout(r,ms));}
 
-/* KOSPI/KOSDAQ 지수 구독 */
-function subscribeIndex(key){
-  ["0001","1001"].forEach(code=>{
+async function subscribeAll(key){
+  // 종목 구독 (100ms 간격)
+  for(const code of TICKERS){
     wsSend({
-      header:{
-        approval_key: key,
-        custtype:     "P",
-        tr_type:      "1",
-        "content-type":"utf-8",
-      },
-      body:{input:{tr_id:"H0UPCNT0", tr_key:code}},
+      header:{approval_key:key,custtype:"P",tr_type:"1","content-type":"utf-8"},
+      body:{input:{tr_id:"H0STCNT0",tr_key:code}},
     });
-  });
+    await delay(100);
+  }
+  // 지수 구독
+  for(const code of ["0001","1001"]){
+    wsSend({
+      header:{approval_key:key,custtype:"P",tr_type:"1","content-type":"utf-8"},
+      body:{input:{tr_id:"H0UPCNT0",tr_key:code}},
+    });
+    await delay(100);
+  }
 }
 
 /* WebSocket 메시지 파싱 */
@@ -426,36 +415,74 @@ function onWsMessage(e){
   }
 }
 
+/* ── Yahoo Finance 폴백 (WebSocket 안될 때) ── */
+let yahooTimer=null;
+let wsConnected=false;
+
+async function yahooFallbackLoop(){
+  if(wsConnected) return; // WS 성공하면 폴링 중단
+  try{
+    const n=await loadInitialData();
+    Object.keys(SPARK_CACHE).forEach(k=>delete SPARK_CACHE[k]);
+    loadIdxYahoo().catch(()=>{});
+    document.getElementById("sdot").className="sdot live";
+    document.getElementById("upd").textContent=new Date().toLocaleTimeString("ko-KR",{hour:"2-digit",minute:"2-digit",second:"2-digit"})+" 업데이트";
+    document.getElementById("src").textContent=`Yahoo Finance · ${n}개 · 클릭→네이버금융`;
+    draw();
+  }catch(e){}
+  if(!wsConnected){
+    yahooTimer=setTimeout(yahooFallbackLoop, 60*1000); // 1분마다 폴링
+  }
+}
+
 async function connectWs(){
-  if(ws) ws.close();
+  if(ws){try{ws.close();}catch(e){}}
   try{
     wsKey=await getWsKey();
     ws=new WebSocket(KIS_WS);
+
+    // 5초 안에 연결 안되면 Yahoo 폴백 시작
+    const wsTimeout=setTimeout(()=>{
+      if(!wsConnected){
+        console.warn("WS 연결 타임아웃 → Yahoo 폴백 시작");
+        document.getElementById("upd").textContent="Yahoo 폴백 모드";
+        yahooFallbackLoop();
+      }
+    }, 5000);
+
     ws.onopen=()=>{
-      console.log("KIS WebSocket 연결됨");
+      clearTimeout(wsTimeout);
+      wsConnected=true;
+      if(yahooTimer){clearTimeout(yahooTimer);yahooTimer=null;}
       document.getElementById("sdot").className="sdot live";
       document.getElementById("upd").textContent="실시간 연결됨";
-      // 모든 종목 구독
-      TICKERS.forEach(code=>subscribeStock(code,wsKey));
-      // 지수 구독
-      subscribeIndex(wsKey);
+      document.getElementById("src").textContent="KIS 실시간 · 클릭→네이버금융";
+      subscribeAll(wsKey);
     };
     ws.onmessage=onWsMessage;
-    ws.onerror=e=>console.warn("WS error",e);
+    ws.onerror=e=>{
+      clearTimeout(wsTimeout);
+      console.warn("WS error");
+    };
     ws.onclose=e=>{
-      console.log("WS closed",e.code);
+      clearTimeout(wsTimeout);
+      wsConnected=false;
       document.getElementById("sdot").className="sdot err";
-      document.getElementById("upd").textContent="연결 끊김 — 재연결 중...";
-      // 5초 후 재연결
+      document.getElementById("upd").textContent="재연결 중...";
       if(wsReconnTimer) clearTimeout(wsReconnTimer);
       wsReconnTimer=setTimeout(connectWs, 5000);
+      // WS 끊기면 Yahoo 폴백도 시작
+      if(!yahooTimer) yahooFallbackLoop();
     };
   }catch(err){
     console.error("WS 연결 실패:",err.message);
+    wsConnected=false;
     document.getElementById("sdot").className="sdot err";
-    document.getElementById("upd").textContent="연결 실패: "+err.message;
+    document.getElementById("upd").textContent="Yahoo 폴백 모드";
     if(wsReconnTimer) clearTimeout(wsReconnTimer);
-    wsReconnTimer=setTimeout(connectWs,10000);
+    wsReconnTimer=setTimeout(connectWs,30000);
+    // WS 실패하면 Yahoo 폴백
+    if(!yahooTimer) yahooFallbackLoop();
   }
 }
 
@@ -464,7 +491,9 @@ async function loadAll(){
   try{
     const n=await loadInitialData();
     Object.keys(SPARK_CACHE).forEach(k=>delete SPARK_CACHE[k]);
-    srcEl.textContent=`KIS Open API · ${n}개 초기 로드 · 실시간 연결 중...`;
+    document.getElementById("sdot").className="sdot live";
+    document.getElementById("upd").textContent="데이터 로드됨";
+    srcEl.textContent=`Yahoo 초기값(${n}개) · KIS 실시간 연결 중...`;
   }catch(e){
     SECTORS.flatMap(s=>s.stocks).forEach(st=>{
       if(!PD[st.c])PD[st.c]={chg:+(Math.random()*10-5).toFixed(2),price:0};
@@ -473,8 +502,13 @@ async function loadAll(){
     document.getElementById("upd").textContent="초기 로드 실패";
     srcEl.textContent="데모 데이터 · 클릭 시 네이버 금융";
   }
-  // WebSocket 실시간 연결
-  await connectWs();
+  // Yahoo로 지수 초기값
+  loadIdxYahoo().catch(()=>{});
+  // KIS WebSocket 비동기로 연결 시도 (실패해도 Yahoo 폴백)
+  connectWs().catch(e=>{
+    console.error(e);
+    if(!yahooTimer) yahooFallbackLoop();
+  });
 }
 
 /* ════════════════════════════════
@@ -1051,7 +1085,16 @@ document.getElementById("nxt").style.cursor="pointer";
 document.getElementById("nxt").title="클릭하여 즉시 갱신";
 document.getElementById("nxt").addEventListener("click",()=>loop());
 
-window.addEventListener("resize",draw);
+/* ── 모바일 브라우저 높이 보정 ── */
+function setVh(){
+  // 삼성/크롬 모바일 브라우저 UI 제외한 실제 높이
+  const vh=window.innerHeight*0.01;
+  document.documentElement.style.setProperty("--vh",vh+"px");
+  document.body.style.height=window.innerHeight+"px";
+}
+setVh();
+window.addEventListener("resize",()=>{setVh();draw();});
+window.addEventListener("orientationchange",()=>{setTimeout(()=>{setVh();draw();},300);});
 setInterval(tick,1000);
 loop();
 </script>
